@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from ui.env_config import load_env, save_env, fetch_models
 from ui.state     import init_state, log, reset_session
 from ui.agent     import run_agent, result_holder, cfg_from_state
-from ui.sessions  import list_sessions, load_messages
+from ui.sessions  import list_sessions, load_messages, load_usage
 from ui.icons     import file_icon, IGNORE_DIRS, SLASH_COMMANDS, ROLE_ICONS
 
 load_env()
@@ -396,13 +396,14 @@ with tab_sessions:
                 )
                 c1, c2 = st.columns(2)
                 if c1.button("▶️ Resume", key=f"resume_{s['id']}", use_container_width=True):
-                    st.session_state.agent_session_id = s["id"]
-                    st.session_state.messages = load_messages(s["id"])
-                    st.session_state.total_input_tokens = 0
-                    st.session_state.total_output_tokens = 0
-                    st.session_state.total_cost = 0.0
+                    usage = load_usage(s["id"])
+                    st.session_state.agent_session_id   = s["id"]
+                    st.session_state.messages           = load_messages(s["id"])
+                    st.session_state.total_input_tokens  = usage["input_tokens"]
+                    st.session_state.total_output_tokens = usage["output_tokens"]
+                    st.session_state.total_cost          = usage["total_cost"]
                     log("info", f"Resumed {s['id']}")
-                    st.success("Session loaded — continue in Chat.")
+                    st.rerun()
                 if c2.button("🆕 Fork", key=f"fork_{s['id']}", use_container_width=True):
                     reset_session()
                     log("info", "New session started")

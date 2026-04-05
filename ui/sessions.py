@@ -59,6 +59,20 @@ def list_sessions() -> list[dict]:
     return sessions
 
 
+def load_usage(session_id: str) -> dict:
+    """Return usage stats from a saved session."""
+    try:
+        data = json.loads((SESSIONS_DIR / f"{session_id}.json").read_text(encoding="utf-8"))
+        usage = data.get("usage", {})
+        return {
+            "input_tokens":  usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0),
+            "total_cost":    data.get("total_cost_usd", 0.0),
+        }
+    except Exception:
+        return {"input_tokens": 0, "output_tokens": 0, "total_cost": 0.0}
+
+
 def load_messages(session_id: str) -> list[dict]:
     """Convert a saved session's messages to chat format."""
     try:
