@@ -7,7 +7,7 @@ echo "✅ Variáveis carregadas:"
 echo "   OPENAI_BASE_URL=$OPENAI_BASE_URL"
 echo "   OPENAI_MODEL=$OPENAI_MODEL"
 echo ""
-echo "🐾 Iniciando Claw Code Agent..."
+echo "🐾 Iniciando Claw Code Agent UI..."
 echo ""
 
-python -m src.main agent-chat --cwd .
+python -m streamlit run app.py
