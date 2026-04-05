@@ -106,6 +106,20 @@ st.markdown("""
   .status-thinking { color: #f0883e; font-size: 13px; font-style: italic; }
   .status-writing  { color: #3fb950; font-size: 13px; font-style: italic; }
   .status-tool     { color: #a371f7; font-size: 13px; font-style: italic; }
+  /* fixed input at bottom — left set by JS */
+  [data-testid="stChatInput"] {
+    position: fixed !important;
+    bottom: 0 !important;
+    right: 0 !important;
+    z-index: 999 !important;
+    background: #0d1117 !important;
+    padding: 12px 24px 16px 24px !important;
+    border-top: 1px solid #30363d !important;
+  }
+  /* space for fixed input at bottom */
+  [data-testid="stMainBlockContainer"] {
+    padding-bottom: 90px !important;
+  }
   .log-entry { font-family: monospace; font-size: 12px; padding: 4px 0; border-bottom: 1px solid #21262d; }
   .log-error { color: #f85149; }
   .log-info  { color: #8b949e; }
@@ -114,6 +128,21 @@ st.markdown("""
     padding: 10px 14px; margin: 6px 0; cursor: pointer;
   }
   .session-active { border-color: #1f6feb !important; }
+  /* file tree */
+  .tree-file {
+    font-family: monospace; font-size: 12px; color: #e6edf3;
+    padding: 2px 0 2px 4px; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tree-file:hover { color: #79c0ff; }
+  .tree-dir  { font-family: monospace; font-size: 12px; color: #79c0ff; font-weight: 600; }
+  .tree-cwd  {
+    background: #1f6feb22; border: 1px solid #1f6feb55;
+    border-radius: 6px; padding: 6px 10px; margin-bottom: 8px;
+    font-family: monospace; font-size: 12px; color: #79c0ff;
+    word-break: break-all;
+  }
+  .tree-nav-btn { font-size: 11px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -137,6 +166,8 @@ def _init_state():
         "cwd": str(Path(".").resolve()),
         "logs": [],   # {level, text, ts}
         "active_tab": "chat",
+        "tree_open": False,
+        "tree_browse_path": str(Path(".").resolve()),
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -150,6 +181,55 @@ def _log(level: str, text: str):
         "text": text,
         "ts": time.strftime("%H:%M:%S"),
     })
+
+# ── JS: keep chat input aligned with sidebar ──────────────────────────────────
+st.components.v1.html("""
+<script>
+(function() {
+  function getSidebarWidth() {
+    const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
+    if (!sidebar) return 0;
+    const w = sidebar.getBoundingClientRect().width;
+    return w > 50 ? w : 0;
+  }
+
+  function syncAll() {
+    const w = getSidebarWidth();
+
+    // fix chat input left edge
+    const input = window.parent.document.querySelector('[data-testid="stChatInput"]');
+    if (input) input.style.left = w + 'px';
+
+    // fix tab bar below streamlit header (60px)
+    const tabs = window.parent.document.querySelector('[data-testid="stTabs"]');
+    const tabBar = tabs ? tabs.firstElementChild : null;
+    if (tabBar) {
+      tabBar.style.position   = 'fixed';
+      tabBar.style.top        = '60px';
+      tabBar.style.left       = w + 'px';
+      tabBar.style.right      = '0';
+      tabBar.style.zIndex     = '997';
+      tabBar.style.background = '#0d1117';
+      tabBar.style.borderBottom = '1px solid #30363d';
+      tabBar.style.padding    = '0 24px';
+    }
+
+    // push block container below header(60) + tabbar(~42)
+    const block = window.parent.document.querySelector('[data-testid="stMainBlockContainer"]');
+    if (block) {
+      block.style.paddingTop = '110px';
+      block.style.overflow = 'visible';
+    }
+
+    // ensure the main section doesn't clip scroll
+    const main = window.parent.document.querySelector('[data-testid="stMain"]');
+    if (main) main.style.overflow = 'visible';
+  }
+
+  setInterval(syncAll, 100);
+})();
+</script>
+""", height=0)
 
 # ── agent runner ──────────────────────────────────────────────────────────────
 _result_holder: dict = {}
@@ -300,8 +380,64 @@ with st.sidebar:
         st.session_state.total_cost = 0.0
         st.rerun()
 
+# ── file tree helpers ─────────────────────────────────────────────────────────
+IGNORE_DIRS = {".git", "__pycache__", ".port_sessions", "venv", ".venv", "node_modules", ".mypy_cache"}
+FILE_ICONS = {
+    ".py": "🐍", ".md": "📝", ".json": "📋", ".txt": "📄",
+    ".sh": "⚙️", ".env": "🔑", ".toml": "⚙️", ".yaml": "⚙️", ".yml": "⚙️",
+    ".js": "🟨", ".ts": "🔷", ".html": "🌐", ".css": "🎨",
+    ".png": "🖼️", ".jpg": "🖼️", ".gif": "🖼️",
+}
+
+def _file_icon(name: str) -> str:
+    ext = Path(name).suffix.lower()
+    return FILE_ICONS.get(ext, "📄")
+
+def _safe_is_dir(p: Path) -> bool:
+    try:
+        return p.is_dir()
+    except OSError:
+        return False
+
+def _safe_is_file(p: Path) -> bool:
+    try:
+        return p.is_file()
+    except OSError:
+        return False
+
+def _safe_iterdir(path: Path) -> list[Path]:
+    try:
+        return sorted(path.iterdir(), key=lambda p: (not _safe_is_dir(p), p.name.lower()))
+    except OSError:
+        return []
+
+def _render_tree(path: Path, depth: int = 0, max_depth: int = 6):
+    """Render directory tree recursively using st.expander for folders."""
+    if depth > max_depth:
+        return
+
+    entries = _safe_iterdir(path)
+    dirs  = [e for e in entries if _safe_is_dir(e)  and e.name not in IGNORE_DIRS]
+    files = [e for e in entries if _safe_is_file(e)]
+
+    for d in dirs:
+        with st.expander(f"📁 {d.name}", expanded=False):
+            # "Set as CWD" button inside each folder
+            c1, c2 = st.columns([3, 1])
+            c1.markdown(f'<span style="font-size:11px;color:#8b949e">{str(d)}</span>', unsafe_allow_html=True)
+            if c2.button("📌 Use", key=f"cwd_{d}", help="Set as working directory"):
+                st.session_state.cwd = str(d)
+                st.session_state.tree_browse_path = str(d)
+                _log("info", f"CWD changed to {d}")
+                st.rerun()
+            _render_tree(d, depth + 1, max_depth)
+
+    for f in files:
+        icon = _file_icon(f.name)
+        st.markdown(f'<div class="tree-file">{icon} {f.name}</div>', unsafe_allow_html=True)
+
 # ── tabs ──────────────────────────────────────────────────────────────────────
-tab_chat, tab_sessions, tab_logs = st.tabs(["💬 Chat", "🗂️ Sessions", "🪵 Logs"])
+tab_chat, tab_tree, tab_sessions, tab_logs = st.tabs(["💬 Chat", "📁 Explorer", "🗂️ Sessions", "🪵 Logs"])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB: CHAT
@@ -318,31 +454,33 @@ with tab_chat:
     if st.session_state.agent_session_id:
         st.caption(f"Session: `{st.session_state.agent_session_id}`")
 
-    for msg in st.session_state.messages:
-        if msg["role"] == "user":
-            st.markdown(
-                f'<div class="chat-bubble-user">👤 {msg["content"]}</div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            is_error = msg["content"].startswith("❌")
-            bubble_class = "chat-bubble-error" if is_error else "chat-bubble-assistant"
-            icon = "⚠️" if is_error else "🐾"
-            content_html = msg["content"].replace("\n", "<br>")
-            tokens_html = ""
-            if not is_error and msg.get("input_tokens") is not None:
-                stop = msg.get("stop_reason", "")
-                stop_badge = f" · {stop}" if stop and stop not in ("stop", "") else ""
-                tokens_html = (
-                    f'<div class="token-badge">'
-                    f'↑ {msg["input_tokens"]:,} in · ↓ {msg["output_tokens"]:,} out'
-                    f' · ${msg.get("cost", 0):.6f}{stop_badge}'
-                    f'</div>'
+    msgs_container = st.container(height=600, border=False)
+    with msgs_container:
+        for msg in st.session_state.messages:
+            if msg["role"] == "user":
+                st.markdown(
+                    f'<div class="chat-bubble-user">👤 {msg["content"]}</div>',
+                    unsafe_allow_html=True,
                 )
-            st.markdown(
-                f'<div class="{bubble_class}">{icon} {content_html}{tokens_html}</div>',
-                unsafe_allow_html=True,
-            )
+            else:
+                is_error = msg["content"].startswith("❌")
+                bubble_class = "chat-bubble-error" if is_error else "chat-bubble-assistant"
+                icon = "⚠️" if is_error else "🐾"
+                content_html = msg["content"].replace("\n", "<br>")
+                tokens_html = ""
+                if not is_error and msg.get("input_tokens") is not None:
+                    stop = msg.get("stop_reason", "")
+                    stop_badge = f" · {stop}" if stop and stop not in ("stop", "") else ""
+                    tokens_html = (
+                        f'<div class="token-badge">'
+                        f'↑ {msg["input_tokens"]:,} in · ↓ {msg["output_tokens"]:,} out'
+                        f' · ${msg.get("cost", 0):.6f}{stop_badge}'
+                        f'</div>'
+                    )
+                st.markdown(
+                    f'<div class="{bubble_class}">{icon} {content_html}{tokens_html}</div>',
+                    unsafe_allow_html=True,
+                )
 
     injected = st.session_state.pop("_inject_prompt", None)
     prompt = st.chat_input("Type a message or /command...", key="chat_input")
@@ -411,6 +549,92 @@ with tab_chat:
 
             st.session_state.status = "idle"
             st.rerun()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB: EXPLORER
+# ═══════════════════════════════════════════════════════════════════════════════
+with tab_tree:
+    st.markdown("### 📁 Explorer")
+
+    browse = Path(st.session_state.tree_browse_path)
+
+    # breadcrumb + navigation bar
+    parts = browse.parts
+    st.markdown(
+        f'<div class="tree-cwd">📍 {browse}</div>',
+        unsafe_allow_html=True,
+    )
+
+    nav_cols = st.columns([1, 1, 1, 3])
+    if nav_cols[0].button("⬆️ Up", key="tree_up", use_container_width=True):
+        parent = browse.parent
+        if parent != browse:
+            st.session_state.tree_browse_path = str(parent)
+            st.rerun()
+
+    if nav_cols[1].button("🏠 Home", key="tree_home", use_container_width=True):
+        st.session_state.tree_browse_path = str(Path.home())
+        st.rerun()
+
+    if nav_cols[2].button("📌 Set CWD", key="tree_set_cwd", use_container_width=True,
+                          help="Use current browse path as agent working directory"):
+        st.session_state.cwd = str(browse)
+        _log("info", f"CWD set to {browse}")
+        st.success(f"Working directory set to `{browse}`")
+
+    custom_path = nav_cols[3].text_input(
+        "Go to path", value="", placeholder="Paste any path…",
+        key="tree_custom_path", label_visibility="collapsed",
+    )
+    if custom_path.strip() and Path(custom_path.strip()).exists():
+        st.session_state.tree_browse_path = str(Path(custom_path.strip()).resolve())
+        st.rerun()
+
+    st.caption(f"Agent CWD: `{st.session_state.cwd}`")
+    st.markdown("---")
+
+    # render tree from browse path
+    browse_path = Path(st.session_state.tree_browse_path)
+    if not browse_path.exists():
+        st.error(f"Path does not exist: {browse_path}")
+    else:
+        # top-level dirs as expanders, files listed below
+        try:
+            entries = sorted(browse_path.iterdir(), key=lambda p: (not _safe_is_dir(p), p.name.lower()))
+        except OSError:
+            entries = []
+            st.error("Permission denied.")
+
+        dirs  = [e for e in entries if _safe_is_dir(e)  and e.name not in IGNORE_DIRS]
+        files = [e for e in entries if _safe_is_file(e)]
+
+        for d in dirs:
+            with st.expander(f"📁 {d.name}"):
+                hc1, hc2, hc3 = st.columns([3, 1, 1])
+                hc1.markdown(f'<span style="font-size:11px;color:#8b949e">{d}</span>', unsafe_allow_html=True)
+                if hc2.button("📌 CWD", key=f"cwd_top_{d.name}", help="Set as agent working directory"):
+                    st.session_state.cwd = str(d)
+                    _log("info", f"CWD changed to {d}")
+                    st.rerun()
+                if hc3.button("🔍 Open", key=f"open_top_{d.name}", help="Browse into this folder"):
+                    st.session_state.tree_browse_path = str(d)
+                    st.rerun()
+                _render_tree(d, depth=1)
+
+        if files:
+            st.markdown("**Files**")
+            for f in files:
+                icon = _file_icon(f.name)
+                try:
+                    size = f.stat().st_size
+                    size_str = f"{size/1024:.1f} KB" if size >= 1024 else f"{size} B"
+                except OSError:
+                    size_str = "?"
+                st.markdown(
+                    f'<div class="tree-file">{icon} {f.name} '
+                    f'<span style="color:#8b949e;font-size:10px">{size_str}</span></div>',
+                    unsafe_allow_html=True,
+                )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB: SESSIONS
