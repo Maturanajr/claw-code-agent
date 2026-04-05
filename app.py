@@ -11,7 +11,7 @@ import streamlit.components.v1 as components
 # ── bootstrap ─────────────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
 
-from ui.env_config import load_env, save_env, fetch_models
+from ui.env_config import load_env, save_env, fetch_models, get_model_pricing
 from ui.state     import init_state, log, reset_session
 from ui.agent     import run_agent, result_holder, cfg_from_state
 from ui.sessions  import list_sessions, load_messages, load_usage
@@ -176,6 +176,12 @@ with st.sidebar:
     c1.metric("Input",  f"{st.session_state.total_input_tokens:,}")
     c2.metric("Output", f"{st.session_state.total_output_tokens:,}")
     st.metric("Cost (USD)", f"${st.session_state.total_cost:.6f}")
+    # show live pricing for current model
+    _in, _out = get_model_pricing(st.session_state.model)
+    if _in or _out:
+        pc1, pc2 = st.columns(2)
+        pc1.markdown(f'<div style="font-size:11px;color:#8b949e">↑ in<br><span style="color:#e6edf3">${_in:.4f}/1M</span></div>', unsafe_allow_html=True)
+        pc2.markdown(f'<div style="font-size:11px;color:#8b949e">↓ out<br><span style="color:#e6edf3">${_out:.4f}/1M</span></div>', unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("### ⚡ Slash Commands")
@@ -244,7 +250,8 @@ with tab_chat:
             None,
         )
         if last_user:
-            cfg = cfg_from_state(st.session_state)
+            input_cost, output_cost = get_model_pricing(st.session_state.model)
+            cfg = cfg_from_state(st.session_state, input_cost, output_cost)
             result_holder.clear()
             t = threading.Thread(
                 target=run_agent,

@@ -4,7 +4,7 @@ import traceback
 from pathlib import Path
 
 from src.agent_runtime import LocalCodingAgent
-from src.agent_types import AgentRuntimeConfig, AgentPermissions, ModelConfig
+from src.agent_types import AgentRuntimeConfig, AgentPermissions, ModelConfig, ModelPricing
 from src.session_store import load_agent_session
 
 # shared result holder between main thread and worker thread
@@ -17,6 +17,10 @@ def build_agent(cfg: dict) -> LocalCodingAgent:
             model=cfg["model"],
             base_url=cfg["base_url"],
             api_key=cfg["api_key"],
+            pricing=ModelPricing(
+                input_cost_per_million_tokens_usd=cfg.get("input_cost_per_million", 0.0),
+                output_cost_per_million_tokens_usd=cfg.get("output_cost_per_million", 0.0),
+            ),
         ),
         runtime_config=AgentRuntimeConfig(
             cwd=Path(cfg["cwd"]).resolve(),
@@ -51,8 +55,11 @@ def run_agent(prompt: str, session_id: str | None, cfg: dict) -> None:
         result_holder["tb"] = traceback.format_exc()
 
 
-def cfg_from_state(state) -> dict:
+def cfg_from_state(state, input_cost: float = 0.0, output_cost: float = 0.0) -> dict:
     """Snapshot relevant keys from st.session_state (safe for threads)."""
-    return {k: state[k] for k in
-            ("model", "base_url", "api_key", "cwd", "max_turns",
-             "allow_write", "allow_shell", "unsafe")}
+    return {
+        **{k: state[k] for k in ("model", "base_url", "api_key", "cwd", "max_turns",
+                                  "allow_write", "allow_shell", "unsafe")},
+        "input_cost_per_million":  input_cost,
+        "output_cost_per_million": output_cost,
+    }
