@@ -545,29 +545,25 @@ with tab_chat:
     with msgs_container:
         for msg in st.session_state.messages:
             if msg["role"] == "user":
-                st.markdown(
-                    f'<div class="chat-bubble-user">👤 {msg["content"]}</div>',
-                    unsafe_allow_html=True,
-                )
+                with st.chat_message("user"):
+                    st.markdown(msg["content"])
             else:
                 is_error = msg["content"].startswith("❌")
-                bubble_class = "chat-bubble-error" if is_error else "chat-bubble-assistant"
-                icon = "⚠️" if is_error else "🐾"
-                content_html = msg["content"].replace("\n", "<br>")
-                tokens_html = ""
-                if not is_error and msg.get("input_tokens") is not None:
-                    stop = msg.get("stop_reason", "")
-                    stop_badge = f" · {stop}" if stop and stop not in ("stop", "") else ""
-                    tokens_html = (
-                        f'<div class="token-badge">'
-                        f'↑ {msg["input_tokens"]:,} in · ↓ {msg["output_tokens"]:,} out'
-                        f' · ${msg.get("cost", 0):.6f}{stop_badge}'
-                        f'</div>'
-                    )
-                st.markdown(
-                    f'<div class="{bubble_class}">{icon} {content_html}{tokens_html}</div>',
-                    unsafe_allow_html=True,
-                )
+                with st.chat_message("assistant"):
+                    if is_error:
+                        st.error(msg["content"])
+                    else:
+                        st.markdown(msg["content"])
+                        if msg.get("input_tokens") is not None:
+                            stop = msg.get("stop_reason", "")
+                            stop_badge = f" · {stop}" if stop and stop not in ("stop", "") else ""
+                            st.markdown(
+                                f'<div class="token-badge">'
+                                f'↑ {msg["input_tokens"]:,} in · ↓ {msg["output_tokens"]:,} out'
+                                f' · ${msg.get("cost", 0):.6f}{stop_badge}'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
 
     injected = st.session_state.pop("_inject_prompt", None)
     prompt = st.chat_input("Type a message or /command...", key="chat_input")
