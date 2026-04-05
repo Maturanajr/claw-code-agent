@@ -272,7 +272,94 @@ def _run_agent(prompt: str, session_id: str | None, cfg: dict):
         _result_holder["tb"] = traceback.format_exc()
 
 # ── list saved sessions ───────────────────────────────────────────────────────
+def _load_session_messages(session_id: str) -> list[dict]:
+    """Load messages from a saved session and convert to chat format."""
+    try:
+        f = Path(".port_sessions/agent") / f"{session_id}.json"
+        data = json.loads(f.read_text(encoding="utf-8"))
+        chat_msgs = []
+        for m in data.get("messages", []):
+            role = m.get("role", "")
+            content = m.get("content", "")
+            if not content or role == "system":
+                continue
+            # content can be a list of blocks (tool calls etc)
+            if isinstance(content, list):
+                text = " ".join(
+                    block.get("text", "") for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                )
+            else:
+                text = str(content)
+            if not text.strip():
+                continue
+            if role == "user":
+                # skip system-reminder injections
+                if text.strip().startswith("<system-reminder>"):
+                    continue
+                chat_msgs.append({"role": "user", "content": text})
+            elif role == "assistant":
+                chat_msgs.append({
+                    "role": "assistant",
+                    "content": text,
+                    "input_tokens": None,
+                    "output_tokens": None,
+                    "cost": 0.0,
+                    "stop_reason": "",
+                })
+        return chat_msgs
+    except Exception:
+        return []
+
+def _relative_time(mtime: float) -> str:
+    diff = time.time() - mtime
+    if diff < 60:
+        return "just now"
+    if diff < 3600:
+        return f"{int(diff/60)}m ago"
+    if diff < 86400:
+        return f"{int(diff/3600)}h ago"
+    if diff < 86400 * 7:
+        return f"{int(diff/86400)}d ago"
+    return time.strftime("%b %d, %Y", time.localtime(mtime))
+
 def _list_sessions() -> list[dict]:
+    sessions_dir = Path(".port_sessions/agent")
+    if not sessions_dir.exists():
+        return []
+    sessions = []
+    for f in sorted(sessions_dir.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+            msgs = data.get("messages", [])
+            # count only user/assistant messages (not system)
+            user_msgs = sum(1 for m in msgs if m.get("role") == "user"
+                           and not str(m.get("content","")).strip().startswith("<system-reminder>"))
+            asst_msgs = sum(1 for m in msgs if m.get("role") == "assistant")
+            # first user message as preview
+            first_user = next(
+                (str(m.get("content",""))[:80] for m in msgs
+                 if m.get("role") == "user"
+                 and not str(m.get("content","")).strip().startswith("<system-reminder>")),
+                ""
+            )
+            mtime = f.stat().st_mtime
+            sessions.append({
+                "id": f.stem,
+                "turns": data.get("turns", "?"),
+                "model": data.get("model_config", {}).get("model", "?"),
+                "mtime": mtime,
+                "mtime_rel": _relative_time(mtime),
+                "mtime_abs": time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)),
+                "user_msgs": user_msgs,
+                "asst_msgs": asst_msgs,
+                "total_msgs": user_msgs + asst_msgs,
+                "prompt": first_user,
+                "cost": data.get("total_cost_usd", 0.0),
+            })
+        except Exception:
+            pass
+    return sessions
     sessions_dir = Path(".port_sessions/agent")
     if not sessions_dir.exists():
         return []
@@ -640,53 +727,72 @@ with tab_tree:
 # TAB: SESSIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab_sessions:
-    st.markdown("### 🗂️ Saved Sessions")
-    if st.button("🔄 Refresh", key="refresh_sessions"):
+    hc1, hc2, hc3 = st.columns([3, 1, 1])
+    hc1.markdown("### 🗂️ Sessions")
+    if hc2.button("🔄 Refresh", key="refresh_sessions", use_container_width=True):
         st.rerun()
-
-    sessions = _list_sessions()
-    if not sessions:
-        st.info("No saved sessions found in `.port_sessions/agent/`")
-    else:
-        for s in sessions:
-            is_active = s["id"] == st.session_state.agent_session_id
-            border = "session-active" if is_active else ""
-            active_badge = " 🟢 active" if is_active else ""
-            st.markdown(
-                f'<div class="session-card {border}">'
-                f'<b style="color:#79c0ff">{s["id"][:16]}…</b>{active_badge}<br>'
-                f'<span style="color:#8b949e;font-size:12px">'
-                f'model: {s["model"]} · turns: {s["turns"]} · {s["mtime"]}</span><br>'
-                f'<span style="font-size:12px;color:#e6edf3">{s["prompt"]}…</span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-            col1, col2 = st.columns([1, 1])
-            if col1.button("▶️ Resume this session", key=f"resume_{s['id']}"):
-                st.session_state.agent_session_id = s["id"]
-                st.session_state.messages = []
-                st.session_state.total_input_tokens = 0
-                st.session_state.total_output_tokens = 0
-                st.session_state.total_cost = 0.0
-                _log("info", f"Switched to session {s['id']}")
-                st.success(f"Now using session `{s['id'][:16]}…` — type your next message in Chat.")
-            if col2.button("🆕 New session from here", key=f"new_{s['id']}"):
-                st.session_state.agent_session_id = None
-                st.session_state.messages = []
-                st.session_state.total_input_tokens = 0
-                st.session_state.total_output_tokens = 0
-                st.session_state.total_cost = 0.0
-                _log("info", "Started new session")
-                st.success("New session started — type your first message in Chat.")
-
-    st.markdown("---")
-    if st.button("🆕 Start fresh session", key="new_session_btn", use_container_width=True):
+    if hc3.button("🆕 New", key="new_session_btn", use_container_width=True):
         st.session_state.agent_session_id = None
         st.session_state.messages = []
         st.session_state.total_input_tokens = 0
         st.session_state.total_output_tokens = 0
         st.session_state.total_cost = 0.0
         st.success("New session ready.")
+
+    sessions = _list_sessions()
+    if not sessions:
+        st.info("No saved sessions found in `.port_sessions/agent/`")
+    else:
+        st.caption(f"{len(sessions)} session(s) found")
+        scroll = st.container(height=600, border=False)
+        with scroll:
+            for s in sessions:
+                is_active = s["id"] == st.session_state.agent_session_id
+                border_color = "#1f6feb" if is_active else "#30363d"
+                active_badge = "🟢 active · " if is_active else ""
+
+                st.markdown(
+                    f"""<div style="background:#161b22;border:1px solid {border_color};
+                    border-radius:8px;padding:10px 14px;margin:6px 0">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                      <span style="color:#79c0ff;font-family:monospace;font-size:12px">
+                        {s['id'][:20]}…
+                      </span>
+                      <span style="color:#8b949e;font-size:11px" title="{s['mtime_abs']}">
+                        🕐 {s['mtime_rel']}
+                      </span>
+                    </div>
+                    <div style="margin:4px 0;font-size:12px;color:#8b949e">
+                      {active_badge}🤖 {s['model']} &nbsp;·&nbsp;
+                      💬 {s['total_msgs']} msgs ({s['user_msgs']}↑ {s['asst_msgs']}↓) &nbsp;·&nbsp;
+                      🔄 {s['turns']} turns &nbsp;·&nbsp;
+                      💰 ${s['cost']:.4f}
+                    </div>
+                    <div style="font-size:12px;color:#e6edf3;margin-top:4px;
+                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                      💬 {s['prompt']}
+                    </div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+                c1, c2 = st.columns(2)
+                if c1.button("▶️ Resume", key=f"resume_{s['id']}", use_container_width=True):
+                    st.session_state.agent_session_id = s["id"]
+                    st.session_state.messages = _load_session_messages(s["id"])
+                    st.session_state.total_input_tokens = 0
+                    st.session_state.total_output_tokens = 0
+                    st.session_state.total_cost = 0.0
+                    _log("info", f"Resumed session {s['id']}")
+                    st.success(f"Session loaded — continue in Chat.")
+                if c2.button("🆕 Fork", key=f"fork_{s['id']}", use_container_width=True,
+                             help="Start a new session (discard this one)"):
+                    st.session_state.agent_session_id = None
+                    st.session_state.messages = []
+                    st.session_state.total_input_tokens = 0
+                    st.session_state.total_output_tokens = 0
+                    st.session_state.total_cost = 0.0
+                    _log("info", "Started new session")
+                    st.success("New session started.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB: LOGS
