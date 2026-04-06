@@ -1226,3 +1226,28 @@ def _stream_static_text_result(
             metadata=metadata,
         ),
     )
+
+
+# ── plugin tool registry ──────────────────────────────────────────────────────
+
+def extended_tool_registry(cfg: dict | None = None) -> dict[str, 'AgentTool']:
+    """
+    Porta de entrada para todas as tools do agente.
+
+    Combina default_tool_registry() com todos os plugins ativos em src/tool_plugins/.
+    Qualquer novo arquivo em src/tool_plugins/ que defina PLUGIN: ToolPlugin
+    é automaticamente incluído aqui.
+    """
+    from .tool_plugins import build_registry
+    base = default_tool_registry()
+    plugins = build_registry(cfg or {})
+    return {**base, **plugins}
+
+
+def get_tool_prompt_injection(tool_name: str, cfg: dict | None = None) -> str:
+    """
+    Retorna o prompt de guidance de um plugin para uma tool específica.
+    Injetado apenas quando a tool é chamada (before_tool hook).
+    """
+    from .tool_plugins import get_prompt_for_tool
+    return get_prompt_for_tool(tool_name, cfg or {})

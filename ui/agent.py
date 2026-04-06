@@ -14,29 +14,37 @@ result_holder: dict = {}
 
 
 def build_agent(cfg: dict) -> LocalCodingAgent:
-    from src.agent_tools import default_tool_registry
-    from src.web_search import WEB_SEARCH_TOOL, WEB_FETCH_TOOL
+    from src.agent_tools import extended_tool_registry, get_tool_prompt_injection
+    from src.plugin_runtime import PluginRuntime, PluginManifest, PluginToolHook
 
-    # base registry + web search (always available)
-    registry = {**default_tool_registry(), WEB_SEARCH_TOOL.name: WEB_SEARCH_TOOL, WEB_FETCH_TOOL.name: WEB_FETCH_TOOL}
+    # single entry point — default tools + all active plugins
+    registry = extended_tool_registry(cfg)
 
-    # merge browser tools if enabled
-    if cfg.get("browser_enabled", False):
-        registry = {**registry, **browser_tool_registry()}
+    # inject per-tool prompts as before_tool hooks via PluginRuntime
+    tool_hooks = []
+    for tool_name in registry:
+        prompt = get_tool_prompt_injection(tool_name, cfg)
+        if prompt:
+            tool_hooks.append(PluginToolHook(
+                tool_name=tool_name,
+                before_tool=prompt,
+            ))
 
-    # web search guidance always injected
+    plugin_runtime = None
+    if tool_hooks:
+        manifest = PluginManifest(
+            name="tool-plugins",
+            path="src/tools",
+            tool_hooks=tuple(tool_hooks),
+        )
+        plugin_runtime = PluginRuntime(manifests=(manifest,))
+
+    # web search guidance always in system prompt (brief)
     web_prompt = (
-        "## Web Search\n"
-        "You have `web_search` and `web_fetch` tools for looking up information online.\n"
-        "- Use `web_search` whenever you need current information, facts, or to research a topic.\n"
-        "- Use `web_fetch` to read a specific URL as plain text.\n"
-        "- These are pure HTTP requests — fast, cheap, no browser needed.\n"
-        "- ALWAYS prefer `web_search` over the browser for information lookup.\n"
-        "- Only use the browser when you need to interact with a page (click, scroll, fill forms).\n"
-        "- NEVER fabricate information — if unsure, use `web_search` first."
+        "You have web_search and web_fetch tools for online lookups — no browser needed.\n"
+        "ALWAYS prefer web_search over the browser for information lookup.\n"
+        "Only use the browser when you need to interact with a page."
     )
-
-    # browser guidance injected as append_system_prompt
     browser_prompt = get_browser_guidance_section(cfg.get("browser_enabled", False))
     combined_prompt = web_prompt + ("\n\n" + browser_prompt if browser_prompt else "")
 
@@ -60,6 +68,7 @@ def build_agent(cfg: dict) -> LocalCodingAgent:
             ),
         ),
         tool_registry=registry,
+        plugin_runtime=plugin_runtime,
         append_system_prompt=combined_prompt,
     )
 
