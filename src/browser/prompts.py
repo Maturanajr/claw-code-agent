@@ -48,6 +48,15 @@ These require scrolling before they appear in the DOM:
 - ALWAYS check `browser_recall` before trying something you may have done before on this domain.
 - The session persists cookies/localStorage — you may already be logged in.
 
+### When to use the browser vs not
+- Use the browser when the user explicitly asks to navigate, click, interact with a page, or when you need to extract live content from a specific site.
+- Do NOT use the browser just to answer general knowledge questions — answer from your training data.
+- Do NOT use the browser to search for information you can answer directly.
+- When you need to look something up online, prefer navigating directly to a search URL (e.g. `https://www.google.com/search?q=...`) rather than using the current page context.
+- If the user asks a question that requires web research, use `browser_search` with `base_url="https://www.google.com"` — do NOT stay on whatever page is currently open.
+- `browser_search` automatically returns the page content — read it and answer from it. NEVER answer from memory after a search.
+- NEVER fabricate information. If you don't know something, search and answer from the actual results.
+
 ### Available tools
 browser_open, browser_close, browser_status, browser_navigate,
 browser_search (use for searching — not browser_type),

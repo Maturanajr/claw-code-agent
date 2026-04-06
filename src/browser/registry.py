@@ -57,14 +57,22 @@ def browser_tool_registry() -> dict[str, AgentTool]:
         AgentTool(
             name="browser_search",
             description=(
-                "Smart search on the current page. "
-                "Tries stored domain knowledge first, then URL-based search, then DOM input discovery. "
-                "Saves what works for future use. PREFER this over browser_type for searching."
+                "Smart search. Tries stored domain knowledge first, then URL-based search, then DOM input. "
+                "Saves what works for future use. PREFER this over browser_type for searching. "
+                "Use base_url to search on a specific site (e.g. 'https://www.google.com' to search Google "
+                "regardless of what page is currently open)."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query"},
+                    "base_url": {
+                        "type": "string",
+                        "description": (
+                            "Site to search on. Defaults to current page. "
+                            "Override to search a different site, e.g. 'https://www.google.com'."
+                        ),
+                    },
                 },
                 "required": ["query"],
             },

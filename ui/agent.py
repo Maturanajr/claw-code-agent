@@ -15,14 +15,30 @@ result_holder: dict = {}
 
 def build_agent(cfg: dict) -> LocalCodingAgent:
     from src.agent_tools import default_tool_registry
+    from src.web_search import WEB_SEARCH_TOOL, WEB_FETCH_TOOL
+
+    # base registry + web search (always available)
+    registry = {**default_tool_registry(), WEB_SEARCH_TOOL.name: WEB_SEARCH_TOOL, WEB_FETCH_TOOL.name: WEB_FETCH_TOOL}
 
     # merge browser tools if enabled
-    registry = default_tool_registry()
     if cfg.get("browser_enabled", False):
         registry = {**registry, **browser_tool_registry()}
 
+    # web search guidance always injected
+    web_prompt = (
+        "## Web Search\n"
+        "You have `web_search` and `web_fetch` tools for looking up information online.\n"
+        "- Use `web_search` whenever you need current information, facts, or to research a topic.\n"
+        "- Use `web_fetch` to read a specific URL as plain text.\n"
+        "- These are pure HTTP requests — fast, cheap, no browser needed.\n"
+        "- ALWAYS prefer `web_search` over the browser for information lookup.\n"
+        "- Only use the browser when you need to interact with a page (click, scroll, fill forms).\n"
+        "- NEVER fabricate information — if unsure, use `web_search` first."
+    )
+
     # browser guidance injected as append_system_prompt
     browser_prompt = get_browser_guidance_section(cfg.get("browser_enabled", False))
+    combined_prompt = web_prompt + ("\n\n" + browser_prompt if browser_prompt else "")
 
     return LocalCodingAgent(
         model_config=ModelConfig(
@@ -44,7 +60,7 @@ def build_agent(cfg: dict) -> LocalCodingAgent:
             ),
         ),
         tool_registry=registry,
-        append_system_prompt=browser_prompt or None,
+        append_system_prompt=combined_prompt,
     )
 
 

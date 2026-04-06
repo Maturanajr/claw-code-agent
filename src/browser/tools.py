@@ -115,39 +115,47 @@ def browser_navigate(args: dict, ctx: ToolExecutionContext) -> tuple[str, dict]:
 
 def browser_search(args: dict, ctx: ToolExecutionContext) -> tuple[str, dict]:
     """
-    Smart search on the current page or via URL.
-    Tries known domain knowledge first, then URL search, then DOM input discovery.
+    Smart search. Accepts an optional base_url to search on a specific site.
+    Defaults to the current page domain, but can be overridden (e.g. google.com).
+    Tries stored domain knowledge first, then URL search, then DOM input discovery.
     Saves what worked for future use.
     """
     query = _req(args, "query")
     s = _session()
-    current_url = s._page.url
+    # allow caller to specify which site to search on
+    base_url = args.get("base_url") or s._page.url
 
     # 1. check stored knowledge for this domain
-    known = kb.get_fact(current_url, "search")
+    known = kb.get_fact(base_url, "search")
     if known and known.get("method") == "url" and known.get("url_template"):
         url = known["url_template"].replace("{query}", quote_plus(query))
         s.run(s._page.goto(url, wait_until="domcontentloaded"))
         title = s.run(s._page.title())
+        content = s.run(s._page.evaluate("() => document.body.innerText"))
+        snippet = content[:3000].strip()
         return (
-            f"Searched via known URL method.\nURL: {s._page.url}\nTitle: {title}",
+            f"Searched via known URL method.\nURL: {s._page.url}\nTitle: {title}\n\n"
+            f"--- Page content ---\n{snippet}",
             {"method": "url_known", "url": s._page.url},
         )
 
-    # 2. try URL-based search (most reliable, no DOM interaction needed)
-    url_templates = _guess_search_url(current_url, query)
+    # 2. try URL-based search
+    url_templates = _guess_search_url(base_url, query)
     for url_template, method_name in url_templates:
         try:
             s.run(s._page.goto(url_template, wait_until="domcontentloaded"))
             title = s.run(s._page.title())
-            # save this as working method
-            kb.set_fact(current_url, "search", {
+            kb.set_fact(base_url, "search", {
                 "method": "url",
                 "url_template": url_template.replace(quote_plus(query), "{query}"),
-                "notes": f"URL search works. Discovered automatically.",
+                "notes": "URL search works. Discovered automatically.",
             })
+            # read page content so the agent can answer from actual results
+            content = s.run(s._page.evaluate("() => document.body.innerText"))
+            snippet = content[:3000].strip()
             return (
-                f"Searched via URL ({method_name}).\nURL: {s._page.url}\nTitle: {title}",
+                f"Searched via URL ({method_name}).\nURL: {s._page.url}\nTitle: {title}\n\n"
+                f"--- Page content (first 3000 chars) ---\n{snippet}",
                 {"method": method_name, "url": s._page.url},
             )
         except Exception:
@@ -169,14 +177,16 @@ def browser_search(args: dict, ctx: ToolExecutionContext) -> tuple[str, dict]:
         return sel, title, s._page.url
 
     sel, title, final_url = s.run(_dom_search())
-    # save DOM method
-    kb.set_fact(current_url, "search", {
+    kb.set_fact(base_url, "search", {
         "method": "dom",
         "selector": sel,
         "notes": "DOM input search works.",
     })
+    content = s.run(s._page.evaluate("() => document.body.innerText"))
+    snippet = content[:3000].strip()
     return (
-        f"Searched via DOM input (selector: {sel}).\nURL: {final_url}\nTitle: {title}",
+        f"Searched via DOM input (selector: {sel}).\nURL: {final_url}\nTitle: {title}\n\n"
+        f"--- Page content ---\n{snippet}",
         {"method": "dom", "selector": sel, "url": final_url},
     )
 
