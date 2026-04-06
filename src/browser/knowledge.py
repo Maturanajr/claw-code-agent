@@ -2,17 +2,7 @@
 Domain knowledge store — persists what the agent learns about each website.
 Stored in .browser_session/knowledge.json (gitignored).
 
-Structure:
-{
-  "youtube.com": {
-    "search": {
-      "method": "url",
-      "url_template": "https://www.youtube.com/results?search_query={query}",
-      "notes": "URL search is reliable. Input selector times out."
-    },
-    "login": { ... }
-  }
-}
+Also manages browser state persistence (current URL) for session resume.
 """
 from __future__ import annotations
 
@@ -21,7 +11,9 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
-_STORE_PATH = Path(".browser_session/knowledge.json")
+_BASE_DIR = Path(".browser_session")
+_STORE_PATH = _BASE_DIR / "knowledge.json"
+_STATE_PATH = _BASE_DIR / "state.json"
 
 
 def _domain(url: str) -> str:
@@ -78,3 +70,29 @@ def all_knowledge_summary() -> str:
         for key, val in facts.items():
             lines.append(f"  {key}: {json.dumps(val)}")
     return "\n".join(lines)
+
+
+# ── browser state (current URL for session resume) ────────────────────────────
+
+def save_browser_state(url: str, session_id: str | None = None) -> None:
+    """Persist the current browser URL so it can be restored on resume."""
+    _BASE_DIR.mkdir(parents=True, exist_ok=True)
+    _STATE_PATH.write_text(
+        json.dumps({"url": url, "session_id": session_id}, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_browser_state() -> dict:
+    """Return the last saved browser state, or empty dict."""
+    if _STATE_PATH.exists():
+        try:
+            return json.loads(_STATE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def clear_browser_state() -> None:
+    if _STATE_PATH.exists():
+        _STATE_PATH.unlink()

@@ -23,6 +23,12 @@ def relative_time(mtime: float) -> str:
 def list_sessions() -> list[dict]:
     if not SESSIONS_DIR.exists():
         return []
+    try:
+        from src.browser.knowledge import load_browser_state
+        browser_state = load_browser_state()
+    except Exception:
+        browser_state = {}
+
     sessions = []
     for f in sorted(SESSIONS_DIR.glob("*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
         try:
@@ -41,18 +47,24 @@ def list_sessions() -> list[dict]:
                 "",
             )
             mtime = f.stat().st_mtime
+            browser_url = (
+                browser_state.get("url")
+                if browser_state.get("session_id") == f.stem
+                else None
+            )
             sessions.append({
-                "id":        f.stem,
-                "turns":     data.get("turns", "?"),
-                "model":     data.get("model_config", {}).get("model", "?"),
-                "mtime":     mtime,
-                "mtime_rel": relative_time(mtime),
-                "mtime_abs": time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)),
-                "user_msgs": user_msgs,
-                "asst_msgs": asst_msgs,
-                "total_msgs": user_msgs + asst_msgs,
-                "prompt":    first_user,
-                "cost":      data.get("total_cost_usd", 0.0),
+                "id":          f.stem,
+                "turns":       data.get("turns", "?"),
+                "model":       data.get("model_config", {}).get("model", "?"),
+                "mtime":       mtime,
+                "mtime_rel":   relative_time(mtime),
+                "mtime_abs":   time.strftime("%Y-%m-%d %H:%M", time.localtime(mtime)),
+                "user_msgs":   user_msgs,
+                "asst_msgs":   asst_msgs,
+                "total_msgs":  user_msgs + asst_msgs,
+                "prompt":      first_user,
+                "cost":        data.get("total_cost_usd", 0.0),
+                "browser_url": browser_url,
             })
         except Exception:
             pass
@@ -60,7 +72,6 @@ def list_sessions() -> list[dict]:
 
 
 def load_usage(session_id: str) -> dict:
-    """Return usage stats from a saved session."""
     try:
         data = json.loads((SESSIONS_DIR / f"{session_id}.json").read_text(encoding="utf-8"))
         usage = data.get("usage", {})
@@ -74,7 +85,6 @@ def load_usage(session_id: str) -> dict:
 
 
 def load_messages(session_id: str) -> list[dict]:
-    """Convert a saved session's messages to chat format."""
     try:
         data = json.loads((SESSIONS_DIR / f"{session_id}.json").read_text(encoding="utf-8"))
         chat: list[dict] = []

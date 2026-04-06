@@ -413,31 +413,52 @@ with tab_sessions:
                 is_active    = s["id"] == st.session_state.agent_session_id
                 border_color = "#1f6feb" if is_active else "#30363d"
                 active_badge = "🟢 active · " if is_active else ""
-                st.markdown(
-                    f"""<div style="background:#161b22;border:1px solid {border_color};
-                    border-radius:8px;padding:10px 14px;margin:6px 0">
-                    <div style="display:flex;justify-content:space-between">
-                      <span style="color:#79c0ff;font-family:monospace;font-size:12px">{s['id'][:20]}…</span>
-                      <span style="color:#8b949e;font-size:11px" title="{s['mtime_abs']}">🕐 {s['mtime_rel']}</span>
-                    </div>
-                    <div style="margin:4px 0;font-size:12px;color:#8b949e">
-                      {active_badge}🤖 {s['model']} · 💬 {s['total_msgs']} msgs
-                      ({s['user_msgs']}↑ {s['asst_msgs']}↓) · 🔄 {s['turns']} turns · 💰 ${s['cost']:.4f}
-                    </div>
-                    <div style="font-size:12px;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                      💬 {s['prompt']}
-                    </div></div>""",
-                    unsafe_allow_html=True,
+                browser_badge = (
+                    f"<div style='font-size:11px;color:#a371f7;margin-top:2px'>🌐 {s['browser_url']}</div>"
+                    if s.get("browser_url") else ""
                 )
+                card = (
+                    f'<div style="background:#161b22;border:1px solid {border_color};border-radius:8px;padding:10px 14px;margin:6px 0">'
+                    f'<div style="display:flex;justify-content:space-between">'
+                    f'<span style="color:#79c0ff;font-family:monospace;font-size:12px">{s["id"][:20]}…</span>'
+                    f'<span style="color:#8b949e;font-size:11px" title="{s["mtime_abs"]}">🕐 {s["mtime_rel"]}</span>'
+                    f'</div>'
+                    f'<div style="margin:4px 0;font-size:12px;color:#8b949e">'
+                    f'{active_badge}🤖 {s["model"]} · 💬 {s["total_msgs"]} msgs ({s["user_msgs"]}↑ {s["asst_msgs"]}↓) · 🔄 {s["turns"]} turns · 💰 ${s["cost"]:.4f}'
+                    f'</div>'
+                    f'{browser_badge}'
+                    f'<div style="font-size:12px;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">💬 {s["prompt"]}</div>'
+                    f'</div>'
+                )
+                st.markdown(card, unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
                 if c1.button("▶️ Resume", key=f"resume_{s['id']}", use_container_width=True):
                     usage = load_usage(s["id"])
-                    st.session_state.agent_session_id   = s["id"]
-                    st.session_state.messages           = load_messages(s["id"])
+                    st.session_state.agent_session_id    = s["id"]
+                    st.session_state.messages            = load_messages(s["id"])
                     st.session_state.total_input_tokens  = usage["input_tokens"]
                     st.session_state.total_output_tokens = usage["output_tokens"]
                     st.session_state.total_cost          = usage["total_cost"]
                     log("info", f"Resumed {s['id']}")
+
+                    # restore browser state immediately on resume
+                    if s.get("browser_url"):
+                        try:
+                            from src.browser.session import BrowserSession
+                            from src.browser.config import BrowserConfig
+                            from src.browser.knowledge import load_browser_state
+                            bs = BrowserSession.get()
+                            if bs is None or not bs.is_alive():
+                                bs = BrowserSession.launch(BrowserConfig(
+                                    headless=st.session_state.get("browser_headless", False)
+                                ))
+                                log("info", f"Browser reopened for resume → {s['browser_url']}")
+                            if bs._page.url != s["browser_url"]:
+                                bs.run(bs._page.goto(s["browser_url"], wait_until="domcontentloaded"))
+                                log("info", f"Browser navigated to {s['browser_url']}")
+                        except Exception as e:
+                            log("error", f"Browser restore failed: {e}")
+
                     st.rerun()
                 if c2.button("🆕 Fork", key=f"fork_{s['id']}", use_container_width=True):
                     reset_session()
