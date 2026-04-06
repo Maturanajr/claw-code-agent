@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from ui.env_config import load_env, save_env, fetch_models, get_model_pricing
 from ui.state     import init_state, log, reset_session
 from ui.agent     import run_agent, result_holder, cfg_from_state
-from ui.sessions  import list_sessions, load_messages, load_usage
+from ui.sessions  import list_sessions, load_messages, load_usage, delete_session, delete_all_sessions
 from ui.icons     import file_icon, IGNORE_DIRS, SLASH_COMMANDS, ROLE_ICONS
 
 load_env()
@@ -394,13 +394,27 @@ with tab_tree:
 # TAB: SESSIONS
 # ─────────────────────────────────────────────────────────────────────────────
 with tab_sessions:
-    hc = st.columns([3, 1, 1])
+    hc = st.columns([3, 1, 1, 1])
     hc[0].markdown("### 🗂️ Sessions")
     if hc[1].button("🔄 Refresh", key="refresh_sessions", use_container_width=True):
         st.rerun()
     if hc[2].button("🆕 New", key="new_session_btn", use_container_width=True):
         reset_session()
         st.success("New session ready.")
+    if hc[3].button("🗑️ All", key="delete_all_sessions_btn", use_container_width=True,
+                    help="Delete all sessions"):
+        if st.session_state.get("_confirm_delete_all"):
+            n = delete_all_sessions()
+            reset_session()
+            st.session_state.pop("_confirm_delete_all", None)
+            log("info", f"Deleted {n} sessions")
+            st.rerun()
+        else:
+            st.session_state["_confirm_delete_all"] = True
+            st.rerun()
+
+    if st.session_state.get("_confirm_delete_all"):
+        st.warning("⚠️ Delete ALL sessions? Click 🗑️ All again to confirm, or Refresh to cancel.")
 
     sessions = list_sessions()
     if not sessions:
@@ -431,7 +445,7 @@ with tab_sessions:
                     f'</div>'
                 )
                 st.markdown(card, unsafe_allow_html=True)
-                c1, c2 = st.columns(2)
+                c1, c2, c3 = st.columns([2, 2, 1])
                 if c1.button("▶️ Resume", key=f"resume_{s['id']}", use_container_width=True):
                     usage = load_usage(s["id"])
                     st.session_state.agent_session_id    = s["id"]
@@ -446,7 +460,6 @@ with tab_sessions:
                         try:
                             from src.browser.session import BrowserSession
                             from src.browser.config import BrowserConfig
-                            from src.browser.knowledge import load_browser_state
                             bs = BrowserSession.get()
                             if bs is None or not bs.is_alive():
                                 bs = BrowserSession.launch(BrowserConfig(
@@ -464,6 +477,12 @@ with tab_sessions:
                     reset_session()
                     log("info", "New session started")
                     st.success("New session started.")
+                if c3.button("🗑️", key=f"del_{s['id']}", use_container_width=True, help="Delete this session"):
+                    if st.session_state.agent_session_id == s["id"]:
+                        reset_session()
+                    delete_session(s["id"])
+                    log("info", f"Deleted session {s['id']}")
+                    st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB: LOGS

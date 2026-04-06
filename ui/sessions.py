@@ -115,3 +115,29 @@ def load_messages(session_id: str) -> list[dict]:
         return chat
     except Exception:
         return []
+
+
+def delete_session(session_id: str) -> bool:
+    """Delete a session file. Returns True if deleted."""
+    try:
+        f = SESSIONS_DIR / f"{session_id}.json"
+        if f.exists():
+            f.unlink()
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def delete_all_sessions() -> int:
+    """Delete all session files. Returns count deleted."""
+    count = 0
+    if not SESSIONS_DIR.exists():
+        return 0
+    for f in SESSIONS_DIR.glob("*.json"):
+        try:
+            f.unlink()
+            count += 1
+        except Exception:
+            pass
+    return count
