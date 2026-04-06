@@ -1,14 +1,21 @@
 """
-Auto-discovery for tool plugins in src/tools/.
+Auto-discovery for tool plugins in src/tool_plugins/.
+
+NOTE: This is different from src/tools.py (porting inventory) and
+src/tool_pool.py (porting pool) — those are part of the original
+Claude Code porting architecture and should not be moved here.
+
+This package contains EXECUTABLE tool plugins that extend the agent:
+- Each file defines PLUGIN: ToolPlugin
+- Discovered and registered automatically via extended_tool_registry()
+- Add new tools by creating a new file with PLUGIN = ToolPlugin(...)
 
 Any file in this directory that defines a module-level `PLUGIN: ToolPlugin`
 is automatically discovered and registered.
 
 Usage:
-    from src.tools import build_registry, get_prompt_for_tool
-
-    registry = build_registry(cfg)          # dict[str, AgentTool]
-    prompt   = get_prompt_for_tool("web_search", cfg)  # str | ""
+    from src.agent_tools import extended_tool_registry
+    registry = extended_tool_registry(cfg)
 """
 from __future__ import annotations
 
