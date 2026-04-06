@@ -6,12 +6,24 @@ from pathlib import Path
 from src.agent_runtime import LocalCodingAgent
 from src.agent_types import AgentRuntimeConfig, AgentPermissions, ModelConfig, ModelPricing
 from src.session_store import load_agent_session
+from src.browser.registry import browser_tool_registry
+from src.browser.prompts import get_browser_guidance_section
 
 # shared result holder between main thread and worker thread
 result_holder: dict = {}
 
 
 def build_agent(cfg: dict) -> LocalCodingAgent:
+    from src.agent_tools import default_tool_registry
+
+    # merge browser tools if enabled
+    registry = default_tool_registry()
+    if cfg.get("browser_enabled", False):
+        registry = {**registry, **browser_tool_registry()}
+
+    # browser guidance injected as append_system_prompt
+    browser_prompt = get_browser_guidance_section(cfg.get("browser_enabled", False))
+
     return LocalCodingAgent(
         model_config=ModelConfig(
             model=cfg["model"],
@@ -31,6 +43,8 @@ def build_agent(cfg: dict) -> LocalCodingAgent:
                 allow_destructive_shell_commands=cfg["unsafe"],
             ),
         ),
+        tool_registry=registry,
+        append_system_prompt=browser_prompt or None,
     )
 
 
@@ -62,4 +76,5 @@ def cfg_from_state(state, input_cost: float = 0.0, output_cost: float = 0.0) -> 
                                   "allow_write", "allow_shell", "unsafe")},
         "input_cost_per_million":  input_cost,
         "output_cost_per_million": output_cost,
+        "browser_enabled": state.get("browser_enabled", False),
     }

@@ -122,7 +122,7 @@ with st.sidebar:
     st.markdown("## 🐾 Claw Code Agent")
     st.markdown("---")
 
-    with st.expander("⚙️ Model Config", expanded=True):
+    with st.expander("⚙️ Model Config", expanded=False):
         base_url_input = st.text_input("Base URL", value=st.session_state.base_url, key="sb_base_url")
         api_key_input  = st.text_input("API Key",  value=st.session_state.api_key,  type="password", key="sb_api_key")
 
@@ -169,6 +169,34 @@ with st.sidebar:
     with st.expander("🔧 Runtime"):
         st.session_state.max_turns = st.slider("Max Turns", 1, 30, st.session_state.max_turns)
         st.session_state.cwd       = st.text_input("Working Directory", value=st.session_state.cwd)
+
+    with st.expander("🌐 Browser", expanded=False):
+        from src.browser.session import BrowserSession
+        st.session_state.browser_enabled  = st.checkbox("Enable browser tools for agent", value=st.session_state.browser_enabled)
+        st.session_state.browser_headless = st.checkbox("Headless mode", value=st.session_state.browser_headless)
+
+        bs = BrowserSession.get()
+        alive = bs is not None and bs.is_alive()
+        status_color = "🟢" if alive else "🔴"
+        st.markdown(f"{status_color} Browser: **{'LIVE' if alive else 'closed'}**")
+        if alive:
+            info = bs.status()
+            st.caption(f"📍 {info.get('url', '—')}")
+        if not st.session_state.browser_enabled:
+            st.caption("⚠️ Enable browser tools so the agent can use the browser.")
+
+        bc1, bc2 = st.columns(2)
+        if bc1.button("▶️ Open", key="browser_open_btn", use_container_width=True):
+            from src.browser.session import BrowserSession
+            from src.browser.config import BrowserConfig
+            BrowserSession.launch(BrowserConfig(headless=st.session_state.browser_headless))
+            log("info", "Browser opened")
+            st.rerun()
+        if bc2.button("⏹ Close", key="browser_close_btn", use_container_width=True):
+            from src.browser.session import BrowserSession
+            BrowserSession.close_global()
+            log("info", "Browser closed")
+            st.rerun()
 
     st.markdown("---")
     st.markdown("### 📊 Session Usage")

@@ -26,6 +26,8 @@ def init_state() -> None:
         "cwd": str(Path(".").resolve()),
         "logs": [],
         "tree_browse_path": str(Path(".").resolve()),
+        "browser_enabled": True,
+        "browser_headless": False,
     }
     for k, v in defaults.items():
         if k not in st.session_state:

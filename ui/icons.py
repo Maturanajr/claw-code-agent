@@ -49,7 +49,7 @@ ROLE_ICONS: dict[str, str] = {
 SLASH_COMMANDS: list[str] = [
     "/help", "/context", "/tools", "/memory",
     "/status", "/permissions", "/model", "/clear",
-    "/tasks", "/plan",
+    "/tasks", "/plan", "/browser",
 ]
 
 

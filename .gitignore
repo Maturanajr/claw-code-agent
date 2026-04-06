@@ -25,3 +25,6 @@ archive/
 
 test_cases
 e-commerce
+
+# Browser session cache (playwright persistent context)
+.browser_session/
